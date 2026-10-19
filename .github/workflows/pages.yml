@@ -1,0 +1,62 @@
+# 网页版：把某个 Release 附件里的 MushiNotes.html 发到 GitHub Pages
+#   https://stevenlin183.github.io/MushiNotes-releases/
+# 为什么挂在 release: published 上：草稿阶段网页不变，Steve 点 Publish 那一刻网页和装机版一起更新；
+# 红了的版本不会 Publish，也就不会上网。跑在公开仓 → Actions 分钟免费（T633 评估 / R109 拍板）。
+# 页面不进 git 历史（不用 gh-pages 分支），每版 8 MB 级的 html 只走 Pages artifact。
+# actions 版本：各官方仓库 releases/latest（2026-10-19 查）—— checkout v7.0.1、upload-pages-artifact v5.0.0、
+# deploy-pages v5.0.1；Pages 文档示例还停在 checkout@v6 / upload@v4 / deploy@v4，以仓库 release 为准。
+name: Pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发的 Release 标签（如 v2.143.0）；留空 = 最新已发布的 Release'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 连点两次 Publish 只留最后一次
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 取 Release 里的 MushiNotes.html
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # release 事件取事件里的标签；手动跑取输入；都空 = gh 默认的 latest release
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          if [ -n "$TAG" ]; then
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p MushiNotes.html -D site
+          else
+            gh release download -R "$GITHUB_REPOSITORY" -p MushiNotes.html -D site
+          fi
+          mv site/MushiNotes.html site/index.html
+          cp -R web/. site/
+          ls -la site
+          echo "发布：${TAG:-latest}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
